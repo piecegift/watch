@@ -57,7 +57,7 @@ func New(peers []string, torSocks string, testnet bool, dir string) (*Watcher, e
 	var db walletdb.DB
 	var err error
 	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
-		db, err = walletdb.Create("bdb", dbFile, false)
+		db, err = walletdb.Create("bdb", dbFile, true)
 	} else {
 		db, err = walletdb.Open("bdb", dbFile, true)
 	}
