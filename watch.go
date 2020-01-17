@@ -32,12 +32,12 @@ var (
 	}
 
 	TestNet3Peers = []string{
+		"btcd-testnet.lightning.computer",
 		"faucet.lightning.community",
-		//"btcd-testnet.lightning.computer",
-		//"testnet1-btcd.zaphq.io",
-		//"testnet2-btcd.zaphq.io",
-		//"testnet3-btcd.zaphq.io",
-		//"testnet4-btcd.zaphq.io",
+		"testnet1-btcd.zaphq.io",
+		"testnet2-btcd.zaphq.io",
+		"testnet3-btcd.zaphq.io",
+		"testnet4-btcd.zaphq.io",
 	}
 )
 
