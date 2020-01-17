@@ -63,7 +63,7 @@ func main() {
 
 	log.Printf("Following %s. Incomes only.", *addr)
 	handler := func(tx *btcutil.Tx, confirmed bool) {
-		outputs := watch.PrepareTxOutputs(tx, false)
+		outputs := watch.PrepareTxOutputs(tx, *testnet)
 		amount, has := outputs[*addr]
 		if !has {
 			return
