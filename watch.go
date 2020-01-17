@@ -158,7 +158,7 @@ func (w *Watcher) StartWatching(startBlock int32, handler func(tx *btcutil.Tx, c
 	w.quitChan = quitChan
 	startBlockStamp := &headerfs.BlockStamp{Height: startBlock}
 	w.rescan = neutrino.NewRescan(
-		&neutrino.RescanChainSource{w.cs},
+		&neutrino.RescanChainSource{ChainService: w.cs},
 		neutrino.QuitChan(quitChan),
 		neutrino.StartBlock(startBlockStamp),
 		neutrino.NotificationHandlers(rpcclient.NotificationHandlers{
