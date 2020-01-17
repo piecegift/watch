@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/piecegift/watch"
 )
@@ -62,13 +63,15 @@ func main() {
 	}
 
 	log.Printf("Following %s. Incomes only.", *addr)
-	handler := func(tx *btcutil.Tx, confirmed bool) {
-		outputs := watch.PrepareTxOutputs(tx, *testnet)
-		amount, has := outputs[*addr]
-		if !has {
-			return
+	handler := func(height int32, header *wire.BlockHeader, relevantTxs []*btcutil.Tx) {
+		for _, tx := range relevantTxs {
+			outputs := watch.PrepareTxOutputs(tx, *testnet)
+			amount, has := outputs[*addr]
+			if !has {
+				return
+			}
+			log.Printf("tx %s height %d: +%s.", tx.Hash(), height, amount)
 		}
-		log.Printf("tx %s (confirmed: %v): +%s BTC.", tx.Hash(), confirmed, amount)
 	}
 	watcher.StartWatching(int32(*startBlock), handler)
 	if err := watcher.AddAddresses(*addr); err != nil {

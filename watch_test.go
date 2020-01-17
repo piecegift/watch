@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
 
@@ -43,22 +44,21 @@ func TestWatcher(t *testing.T) {
 
 	check := func(watcher *Watcher) {
 		var wg sync.WaitGroup
-		handler := func(tx *btcutil.Tx, confirmed bool) {
-			if !confirmed {
-				return
+		handler := func(height int32, header *wire.BlockHeader, relevantTxs []*btcutil.Tx) {
+			for _, tx := range relevantTxs {
+				log.Printf("Found tx %s.", tx.Hash())
+				if tx.Hash().String() != txid {
+					return
+				}
+				outputs := PrepareTxOutputs(tx, false)
+				if outputs[addr] != wantAmount {
+					t.Errorf(
+						"Address %s in tx %s got %s, want %s.",
+						addr, txid, outputs[addr], wantAmount,
+					)
+				}
+				wg.Done()
 			}
-			log.Printf("Found tx %s.", tx.Hash())
-			if tx.Hash().String() != txid {
-				return
-			}
-			outputs := PrepareTxOutputs(tx, false)
-			if outputs[addr] != wantAmount {
-				t.Errorf(
-					"Address %s in tx %s got %s, want %s.",
-					addr, txid, outputs[addr], wantAmount,
-				)
-			}
-			wg.Done()
 		}
 		watcher.StartWatching(613000, handler)
 		if err := watcher.AddAddresses(addr); err != nil {

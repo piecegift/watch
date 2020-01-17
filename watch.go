@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
@@ -149,7 +148,9 @@ func (w *Watcher) CurrentHeight() (int32, error) {
 	return header.Height, nil
 }
 
-func (w *Watcher) StartWatching(startBlock int32, handler func(tx *btcutil.Tx, confirmed bool)) {
+type Handler = func(height int32, header *wire.BlockHeader, relevantTxs []*btcutil.Tx)
+
+func (w *Watcher) StartWatching(startBlock int32, handler Handler) {
 	if w.rescan != nil {
 		panic("StartWatching called several times")
 	}
@@ -165,14 +166,7 @@ func (w *Watcher) StartWatching(startBlock int32, handler func(tx *btcutil.Tx, c
 			OnBlockConnected: func(hash *chainhash.Hash, height int32, t time.Time) {
 				log.Printf("New block: %d.", height)
 			},
-			OnRecvTx: func(tx *btcutil.Tx, details *btcjson.BlockDetails) {
-				handler(tx, false)
-			},
-			OnFilteredBlockConnected: func(height int32, header *wire.BlockHeader, relevantTxs []*btcutil.Tx) {
-				for _, tx := range relevantTxs {
-					handler(tx, true)
-				}
-			},
+			OnFilteredBlockConnected: handler,
 			OnFilteredBlockDisconnected: func(height int32, header *wire.BlockHeader) {
 				log.Println("Block disconnected", height)
 			},
