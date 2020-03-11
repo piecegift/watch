@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
@@ -48,10 +50,37 @@ type Watcher struct {
 
 	rescan   *neutrino.Rescan
 	quitChan chan<- struct{}
+
+	// Arguments of New to start from scratch if it breaks.
+	peers    []string
+	torSocks string
+	testnet  bool
+	dir      string
+
+	addresses []string
+	fullClose chan struct{}
+	mu        sync.Mutex
 }
 
 func New(peers []string, torSocks string, testnet bool, dir string) (*Watcher, error) {
-	dbFile := filepath.Join(dir, "wallet.db")
+	watcher := &Watcher{
+		peers:    peers,
+		torSocks: torSocks,
+		testnet:  testnet,
+		dir:      dir,
+
+		fullClose: make(chan struct{}),
+	}
+
+	if err := watcher.start(); err != nil {
+		return nil, err
+	}
+
+	return watcher, nil
+}
+
+func (w *Watcher) start() error {
+	dbFile := filepath.Join(w.dir, "wallet.db")
 
 	var db walletdb.DB
 	var err error
@@ -61,16 +90,16 @@ func New(peers []string, torSocks string, testnet bool, dir string) (*Watcher, e
 		db, err = walletdb.Open("bdb", dbFile, true)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("walletdb: %w", err)
+		return fmt.Errorf("walletdb: %w", err)
 	}
 
-	dataDir := filepath.Join(dir, "data")
+	dataDir := filepath.Join(w.dir, "data")
 	if err := os.Mkdir(dataDir, 0700); err != nil && !os.IsExist(err) {
-		return nil, fmt.Errorf("Mkdir: %w", err)
+		return fmt.Errorf("Mkdir: %w", err)
 	}
 
 	params := chaincfg.MainNetParams
-	if testnet {
+	if w.testnet {
 		params = chaincfg.TestNet3Params
 	}
 
@@ -78,14 +107,14 @@ func New(peers []string, torSocks string, testnet bool, dir string) (*Watcher, e
 		DataDir:       dataDir,
 		Database:      db,
 		ChainParams:   params,
-		AddPeers:      peers,
-		ConnectPeers:  peers,
+		AddPeers:      w.peers,
+		ConnectPeers:  w.peers,
 		PersistToDisk: true, // See https://github.com/lightninglabs/neutrino/pull/194
 	}
 
-	if torSocks != "" {
+	if w.torSocks != "" {
 		proxy := &tor.ProxyNet{
-			SOCKS:           torSocks,
+			SOCKS:           w.torSocks,
 			StreamIsolation: true,
 		}
 		config.Dialer = func(addr net.Addr) (net.Conn, error) {
@@ -98,25 +127,30 @@ func New(peers []string, torSocks string, testnet bool, dir string) (*Watcher, e
 
 	cs, err := neutrino.NewChainService(config)
 	if err != nil {
-		return nil, fmt.Errorf("neutrino.NewChainService: %w", err)
+		return fmt.Errorf("neutrino.NewChainService: %w", err)
 	}
 	if err := cs.Start(); err != nil {
-		return nil, fmt.Errorf("cs.Start: %w", err)
+		return fmt.Errorf("cs.Start: %w", err)
 	}
 
-	watcher := &Watcher{
-		cs:     cs,
-		db:     db,
-		params: &params,
-	}
+	w.cs = cs
+	w.db = db
+	w.params = &params
 
-	return watcher, nil
+	return nil
 }
 
 func (w *Watcher) Close() error {
+	close(w.fullClose)
+	return w.stop()
+}
+
+func (w *Watcher) stop() error {
 	if w.quitChan != nil {
 		close(w.quitChan)
 		w.rescan.WaitForShutdown()
+		w.quitChan = nil
+		w.rescan = nil
 	}
 	if err := w.cs.Stop(); err != nil {
 		return err
@@ -151,6 +185,12 @@ func (w *Watcher) CurrentHeight() (int32, error) {
 type Handler = func(height int32, header *wire.BlockHeader, relevantTxs []*btcutil.Tx)
 
 func (w *Watcher) StartWatching(startBlock int32, handler Handler) {
+	select {
+	case <-w.fullClose:
+		return
+	default:
+	}
+
 	if w.rescan != nil {
 		panic("StartWatching called several times")
 	}
@@ -176,11 +216,57 @@ func (w *Watcher) StartWatching(startBlock int32, handler Handler) {
 	go func() {
 		for err := range errChan {
 			log.Printf("Rescan error: %v.", err)
+			if strings.Contains(err.Error(), "unable to fetch cfilter") {
+				log.Println("It looks we have bug https://github.com/lightninglabs/neutrino/pull/194#issuecomment-575613975 here. Restarting neutrino.")
+				if err := w.stop(); err != nil {
+					log.Printf("Failed to stop: %v. Giving up.", err)
+					continue
+				}
+				dataDir := filepath.Join(w.dir, "data")
+				if err := os.RemoveAll(dataDir); err != nil {
+					log.Printf("Failed to remove dir %s: %v. Giving up.", dataDir, err)
+					continue
+				}
+				dbFile := filepath.Join(w.dir, "wallet.db")
+				if err := os.Remove(dbFile); err != nil {
+					log.Printf("Failed to remove dbFile %s: %v. Giving up.", dbFile, err)
+					continue
+				}
+
+				if err := w.start(); err != nil {
+					log.Printf("Failed to stop: %v. Giving up.", err)
+					continue
+				}
+				if err := w.WaitForSync(); err != nil {
+					log.Printf("Failed to WaitForSync: %v. Giving up.", err)
+					continue
+				}
+
+				w.StartWatching(startBlock, handler)
+
+				w.mu.Lock()
+				addrs := w.addresses
+				w.mu.Unlock()
+				if err := w.addAddresses(addrs...); err != nil {
+					log.Printf("Failed to add addresses %v: %v. Giving up.", addrs, err)
+					continue
+				}
+			}
 		}
 	}()
 }
 
 func (w *Watcher) AddAddresses(addrs ...string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.addAddresses(addrs...); err != nil {
+		return err
+	}
+	w.addresses = append(w.addresses, addrs...)
+	return nil
+}
+
+func (w *Watcher) addAddresses(addrs ...string) error {
 	aaa := make([]btcutil.Address, 0, len(addrs))
 	for _, addr := range addrs {
 		a, err := btcutil.DecodeAddress(addr, w.params)

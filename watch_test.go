@@ -42,7 +42,7 @@ func TestWatcher(t *testing.T) {
 	const txid = "e42efe31d140e15c37ee6bc71d261b67e94d7aff2367d1ef76910376ca0c5f32"
 	wantAmount := btcutil.Amount(2730)
 
-	check := func(watcher *Watcher) {
+	check := func(watcher *Watcher, startBlock int32) {
 		var wg sync.WaitGroup
 		handler := func(height int32, header *wire.BlockHeader, relevantTxs []*btcutil.Tx) {
 			for _, tx := range relevantTxs {
@@ -60,7 +60,7 @@ func TestWatcher(t *testing.T) {
 				wg.Done()
 			}
 		}
-		watcher.StartWatching(613000, handler)
+		watcher.StartWatching(startBlock, handler)
 		if err := watcher.AddAddresses(addr); err != nil {
 			t.Fatalf("AddAddresses: %v.", err)
 		}
@@ -69,7 +69,7 @@ func TestWatcher(t *testing.T) {
 	}
 
 	log.Println("Checking some address.")
-	check(watcher)
+	check(watcher, 613000)
 
 	log.Println("Closing the watcher.")
 	if err := watcher.Close(); err != nil {
@@ -85,9 +85,22 @@ func TestWatcher(t *testing.T) {
 	if err := watcher.WaitForSync(); err != nil {
 		t.Fatalf("WaitForSync: %v.", err)
 	}
-	check(watcher)
+	check(watcher, 613000)
+
 	log.Println("Closing the watcher.")
 	if err := watcher.Close(); err != nil {
 		t.Fatalf("Close: %v.", err)
 	}
+
+	// https://github.com/lightninglabs/neutrino/pull/194#issuecomment-575613975
+	log.Println("Checking for the bug that happens if there is no scanner on the first run or it starts with higher block than a subsequent scanner.")
+	watcher, err = New(MainNetPeers, "", false, tmpDir)
+	if err != nil {
+		t.Fatalf("New: %v.", err)
+	}
+	log.Println("Running WaitForSync.")
+	if err := watcher.WaitForSync(); err != nil {
+		t.Fatalf("WaitForSync: %v.", err)
+	}
+	check(watcher, 612000)
 }
