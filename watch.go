@@ -85,7 +85,7 @@ func (w *Watcher) start() error {
 
 	var db walletdb.DB
 	var err error
-	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+	if _, err0 := os.Stat(dbFile); os.IsNotExist(err0) {
 		db, err = walletdb.Create("bdb", dbFile, true)
 	} else {
 		db, err = walletdb.Open("bdb", dbFile, true)
