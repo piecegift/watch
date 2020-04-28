@@ -57,9 +57,10 @@ type Watcher struct {
 	testnet  bool
 	dir      string
 
-	addresses []string
-	fullClose chan struct{}
-	mu        sync.Mutex
+	addresses  []string
+	fullClose  chan struct{}
+	mu         sync.Mutex
+	restarting bool
 }
 
 func New(peers []string, torSocks string, testnet bool, dir string) (*Watcher, error) {
@@ -218,51 +219,69 @@ func (w *Watcher) StartWatching(startBlock int32, handler Handler) {
 			log.Printf("Rescan error: %v.", err)
 			if strings.Contains(err.Error(), "unable to fetch cfilter") {
 				log.Println("It looks we have bug https://github.com/lightninglabs/neutrino/pull/194#issuecomment-575613975 here. Restarting neutrino.")
-				if err := w.stop(); err != nil {
-					log.Printf("Failed to stop: %v. Giving up.", err)
-					continue
-				}
-				dataDir := filepath.Join(w.dir, "data")
-				if err := os.RemoveAll(dataDir); err != nil {
-					log.Printf("Failed to remove dir %s: %v. Giving up.", dataDir, err)
-					continue
-				}
-				dbFile := filepath.Join(w.dir, "wallet.db")
-				if err := os.Remove(dbFile); err != nil {
-					log.Printf("Failed to remove dbFile %s: %v. Giving up.", dbFile, err)
-					continue
-				}
-
-				if err := w.start(); err != nil {
-					log.Printf("Failed to stop: %v. Giving up.", err)
-					continue
-				}
-				if err := w.WaitForSync(); err != nil {
-					log.Printf("Failed to WaitForSync: %v. Giving up.", err)
-					continue
-				}
-
-				w.StartWatching(startBlock, handler)
-
-				w.mu.Lock()
-				addrs := w.addresses
-				w.mu.Unlock()
-				if err := w.addAddresses(addrs...); err != nil {
-					log.Printf("Failed to add addresses %v: %v. Giving up.", addrs, err)
-					continue
-				}
+				w.restart(startBlock, handler)
 			}
 		}
 	}()
 }
 
+func (w *Watcher) restart(startBlock int32, handler Handler) {
+	w.mu.Lock()
+	w.restarting = true
+	w.mu.Unlock()
+
+	defer func() {
+		w.mu.Lock()
+		w.restarting = false
+		w.mu.Unlock()
+	}()
+
+	if err := w.stop(); err != nil {
+		log.Printf("Failed to stop: %v. Giving up.", err)
+		return
+	}
+	dataDir := filepath.Join(w.dir, "data")
+	if err := os.RemoveAll(dataDir); err != nil {
+		log.Printf("Failed to remove dir %s: %v. Giving up.", dataDir, err)
+		return
+	}
+	dbFile := filepath.Join(w.dir, "wallet.db")
+	if err := os.Remove(dbFile); err != nil {
+		log.Printf("Failed to remove dbFile %s: %v. Giving up.", dbFile, err)
+		return
+	}
+
+	if err := w.start(); err != nil {
+		log.Printf("Failed to stop: %v. Giving up.", err)
+		return
+	}
+	if err := w.WaitForSync(); err != nil {
+		log.Printf("Failed to WaitForSync: %v. Giving up.", err)
+		return
+	}
+
+	w.StartWatching(startBlock, handler)
+
+	w.mu.Lock()
+	addrs := w.addresses
+	w.mu.Unlock()
+	if err := w.addAddresses(addrs...); err != nil {
+		log.Printf("Failed to add addresses %v: %v. Giving up.", addrs, err)
+		return
+	}
+}
+
 func (w *Watcher) AddAddresses(addrs ...string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.addresses = append(w.addresses, addrs...)
+	if w.restarting {
+		// We can not add addressed during restarting.
+		return nil
+	}
 	if err := w.addAddresses(addrs...); err != nil {
 		return err
 	}
-	w.addresses = append(w.addresses, addrs...)
 	return nil
 }
 
