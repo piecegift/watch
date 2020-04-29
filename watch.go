@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/btcsuite/btcwallet/walletdb"
 	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
@@ -183,9 +181,7 @@ func (w *Watcher) CurrentHeight() (int32, error) {
 	return header.Height, nil
 }
 
-type Handler = func(height int32, header *wire.BlockHeader, relevantTxs []*btcutil.Tx)
-
-func (w *Watcher) StartWatching(startBlock int32, handler Handler) {
+func (w *Watcher) StartWatching(startBlock int32, handlers rpcclient.NotificationHandlers) {
 	select {
 	case <-w.fullClose:
 		return
@@ -203,15 +199,7 @@ func (w *Watcher) StartWatching(startBlock int32, handler Handler) {
 		&neutrino.RescanChainSource{ChainService: w.cs},
 		neutrino.QuitChan(quitChan),
 		neutrino.StartBlock(startBlockStamp),
-		neutrino.NotificationHandlers(rpcclient.NotificationHandlers{
-			OnBlockConnected: func(hash *chainhash.Hash, height int32, t time.Time) {
-				log.Printf("New block: %d.", height)
-			},
-			OnFilteredBlockConnected: handler,
-			OnFilteredBlockDisconnected: func(height int32, header *wire.BlockHeader) {
-				log.Println("Block disconnected", height)
-			},
-		}),
+		neutrino.NotificationHandlers(handlers),
 	)
 	errChan := w.rescan.Start()
 	go func() {
@@ -219,13 +207,13 @@ func (w *Watcher) StartWatching(startBlock int32, handler Handler) {
 			log.Printf("Rescan error: %v.", err)
 			if strings.Contains(err.Error(), "unable to fetch cfilter") {
 				log.Println("It looks we have bug https://github.com/lightninglabs/neutrino/pull/194#issuecomment-575613975 here. Restarting neutrino.")
-				w.restart(startBlock, handler)
+				w.restart(startBlock, handlers)
 			}
 		}
 	}()
 }
 
-func (w *Watcher) restart(startBlock int32, handler Handler) {
+func (w *Watcher) restart(startBlock int32, handlers rpcclient.NotificationHandlers) {
 	w.mu.Lock()
 	w.restarting = true
 	w.mu.Unlock()
@@ -260,7 +248,7 @@ func (w *Watcher) restart(startBlock int32, handler Handler) {
 		return
 	}
 
-	w.StartWatching(startBlock, handler)
+	w.StartWatching(startBlock, handlers)
 
 	w.mu.Lock()
 	addrs := w.addresses

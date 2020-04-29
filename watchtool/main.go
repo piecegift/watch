@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/piecegift/watch"
@@ -73,7 +74,10 @@ func main() {
 			log.Printf("tx %s height %d: +%s.", tx.Hash(), height, amount)
 		}
 	}
-	watcher.StartWatching(int32(*startBlock), handler)
+	handlers := rpcclient.NotificationHandlers{
+		OnFilteredBlockConnected: handler,
+	}
+	watcher.StartWatching(int32(*startBlock), handlers)
 	if err := watcher.AddAddresses(*addr); err != nil {
 		log.Fatalf("AddAddresses: %v.", err)
 	}

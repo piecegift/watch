@@ -6,7 +6,10 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
@@ -60,7 +63,16 @@ func TestWatcher(t *testing.T) {
 				wg.Done()
 			}
 		}
-		watcher.StartWatching(startBlock, handler)
+		handlers := rpcclient.NotificationHandlers{
+			OnBlockConnected: func(hash *chainhash.Hash, height int32, t time.Time) {
+				log.Printf("New block: %d.", height)
+			},
+			OnFilteredBlockConnected: handler,
+			OnFilteredBlockDisconnected: func(height int32, header *wire.BlockHeader) {
+				log.Println("Block disconnected", height)
+			},
+		}
+		watcher.StartWatching(startBlock, handlers)
 		if err := watcher.AddAddresses(addr); err != nil {
 			t.Fatalf("AddAddresses: %v.", err)
 		}
