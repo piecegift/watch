@@ -55,10 +55,10 @@ type Watcher struct {
 	testnet  bool
 	dir      string
 
-	addresses  []string
-	fullClose  chan struct{}
-	mu         sync.Mutex
-	restarting bool
+	addresses []string
+	fullClose chan struct{}
+	mu        sync.Mutex
+	watching  bool
 }
 
 func New(peers []string, torSocks string, testnet bool, dir string) (*Watcher, error) {
@@ -192,6 +192,22 @@ func (w *Watcher) StartWatching(startBlock int32, handlers rpcclient.Notificatio
 		panic("StartWatching called several times")
 	}
 
+	defer func() {
+		w.mu.Lock()
+		w.watching = true
+		w.mu.Unlock()
+	}()
+
+	w.mu.Lock()
+	addresses := w.addresses
+	w.mu.Unlock()
+
+	aaa, err := w.convertAddresses(addresses...)
+	if err != nil {
+		// Should had been detected in AddAddresses.
+		panic(err)
+	}
+
 	quitChan := make(chan struct{})
 	w.quitChan = quitChan
 	startBlockStamp := &headerfs.BlockStamp{Height: startBlock}
@@ -200,6 +216,7 @@ func (w *Watcher) StartWatching(startBlock int32, handlers rpcclient.Notificatio
 		neutrino.QuitChan(quitChan),
 		neutrino.StartBlock(startBlockStamp),
 		neutrino.NotificationHandlers(handlers),
+		neutrino.WatchAddrs(aaa...),
 	)
 	errChan := w.rescan.Start()
 	go func() {
@@ -215,14 +232,8 @@ func (w *Watcher) StartWatching(startBlock int32, handlers rpcclient.Notificatio
 
 func (w *Watcher) restart(startBlock int32, handlers rpcclient.NotificationHandlers) {
 	w.mu.Lock()
-	w.restarting = true
+	w.watching = false
 	w.mu.Unlock()
-
-	defer func() {
-		w.mu.Lock()
-		w.restarting = false
-		w.mu.Unlock()
-	}()
 
 	if err := w.stop(); err != nil {
 		log.Printf("Failed to stop: %v. Giving up.", err)
@@ -249,43 +260,38 @@ func (w *Watcher) restart(startBlock int32, handlers rpcclient.NotificationHandl
 	}
 
 	w.StartWatching(startBlock, handlers)
-
-	w.mu.Lock()
-	addrs := w.addresses
-	w.mu.Unlock()
-	if err := w.addAddresses(addrs...); err != nil {
-		log.Printf("Failed to add addresses %v: %v. Giving up.", addrs, err)
-		return
-	}
 }
 
 func (w *Watcher) AddAddresses(addrs ...string) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.addresses = append(w.addresses, addrs...)
-	if w.restarting {
-		// We can not add addressed during restarting.
-		return nil
-	}
-	if err := w.addAddresses(addrs...); err != nil {
+	aaa, err := w.convertAddresses(addrs...)
+	if err != nil {
 		return err
 	}
-	return nil
-}
 
-func (w *Watcher) addAddresses(addrs ...string) error {
-	aaa := make([]btcutil.Address, 0, len(addrs))
-	for _, addr := range addrs {
-		a, err := btcutil.DecodeAddress(addr, w.params)
-		if err != nil {
-			return fmt.Errorf("btcutil.DecodeAddress: %w", err)
-		}
-		aaa = append(aaa, a)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.addresses = append(w.addresses, addrs...)
+	if !w.watching {
+		// We can not add addressed before StartWatching or during restarting.
+		return nil
 	}
 	if err := w.rescan.Update(neutrino.AddAddrs(aaa...)); err != nil {
 		return fmt.Errorf("rescan.Update: %w", err)
 	}
 	return nil
+}
+
+func (w *Watcher) convertAddresses(addrs ...string) ([]btcutil.Address, error) {
+	aaa := make([]btcutil.Address, 0, len(addrs))
+	for _, addr := range addrs {
+		a, err := btcutil.DecodeAddress(addr, w.params)
+		if err != nil {
+			return nil, fmt.Errorf("btcutil.DecodeAddress: %w", err)
+		}
+		aaa = append(aaa, a)
+	}
+	return aaa, nil
 }
 
 func resolveHost(proxy tor.Net, host string) ([]net.IP, error) {
