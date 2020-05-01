@@ -135,7 +135,7 @@ func TestWatcher(t *testing.T) {
 	if err := watcher.WaitForSync(); err != nil {
 		t.Fatalf("WaitForSync: %v.", err)
 	}
-	check(watcher, 628330, false)
+	check(watcher, 628320, false)
 
 	log.Println("Closing the watcher.")
 	if err := watcher.Close(); err != nil {
