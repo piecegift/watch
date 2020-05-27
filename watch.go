@@ -251,7 +251,7 @@ func (w *Watcher) restart(startBlock int32, handlers rpcclient.NotificationHandl
 	}
 
 	if err := w.start(); err != nil {
-		log.Printf("Failed to stop: %v. Giving up.", err)
+		log.Printf("Failed to start: %v. Giving up.", err)
 		return
 	}
 	if err := w.WaitForSync(); err != nil {
