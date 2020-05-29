@@ -103,12 +103,11 @@ func (w *Watcher) start() error {
 	}
 
 	config := neutrino.Config{
-		DataDir:       dataDir,
-		Database:      db,
-		ChainParams:   params,
-		AddPeers:      w.peers,
-		ConnectPeers:  w.peers,
-		PersistToDisk: true, // See https://github.com/lightninglabs/neutrino/pull/194
+		DataDir:      dataDir,
+		Database:     db,
+		ChainParams:  params,
+		AddPeers:     w.peers,
+		ConnectPeers: w.peers,
 	}
 
 	if w.torSocks != "" {
