@@ -78,41 +78,39 @@ func New(peers []string, torSocks string, testnet bool, dir string) (*Watcher, e
 	return watcher, nil
 }
 
-func (w *Watcher) start() error {
-	dbFile := filepath.Join(w.dir, "wallet.db")
+func makeService(peers []string, torSocks string, testnet bool, dir string) (cs *neutrino.ChainService, db walletdb.DB, params *chaincfg.Params, err error) {
+	dbFile := filepath.Join(dir, "wallet.db")
 
-	var db walletdb.DB
-	var err error
 	if _, err0 := os.Stat(dbFile); os.IsNotExist(err0) {
 		db, err = walletdb.Create("bdb", dbFile, true)
 	} else {
 		db, err = walletdb.Open("bdb", dbFile, true)
 	}
 	if err != nil {
-		return fmt.Errorf("walletdb: %w", err)
+		return nil, nil, nil, fmt.Errorf("walletdb: %w", err)
 	}
 
-	dataDir := filepath.Join(w.dir, "data")
+	dataDir := filepath.Join(dir, "data")
 	if err := os.Mkdir(dataDir, 0700); err != nil && !os.IsExist(err) {
-		return fmt.Errorf("Mkdir: %w", err)
+		return nil, nil, nil, fmt.Errorf("Mkdir: %w", err)
 	}
 
-	params := chaincfg.MainNetParams
-	if w.testnet {
-		params = chaincfg.TestNet3Params
+	params = &chaincfg.MainNetParams
+	if testnet {
+		params = &chaincfg.TestNet3Params
 	}
 
 	config := neutrino.Config{
 		DataDir:      dataDir,
 		Database:     db,
-		ChainParams:  params,
-		AddPeers:     w.peers,
-		ConnectPeers: w.peers,
+		ChainParams:  *params,
+		AddPeers:     peers,
+		ConnectPeers: peers,
 	}
 
-	if w.torSocks != "" {
+	if torSocks != "" {
 		proxy := &tor.ProxyNet{
-			SOCKS:           w.torSocks,
+			SOCKS:           torSocks,
 			StreamIsolation: true,
 		}
 		config.Dialer = func(addr net.Addr) (net.Conn, error) {
@@ -123,17 +121,26 @@ func (w *Watcher) start() error {
 		}
 	}
 
-	cs, err := neutrino.NewChainService(config)
+	cs, err = neutrino.NewChainService(config)
 	if err != nil {
-		return fmt.Errorf("neutrino.NewChainService: %w", err)
+		return nil, nil, nil, fmt.Errorf("neutrino.NewChainService: %w", err)
 	}
 	if err := cs.Start(); err != nil {
-		return fmt.Errorf("cs.Start: %w", err)
+		return nil, nil, nil, fmt.Errorf("cs.Start: %w", err)
+	}
+
+	return
+}
+
+func (w *Watcher) start() error {
+	cs, db, params, err := makeService(w.peers, w.torSocks, w.testnet, w.dir)
+	if err != nil {
+		return err
 	}
 
 	w.cs = cs
 	w.db = db
-	w.params = &params
+	w.params = params
 
 	return nil
 }
