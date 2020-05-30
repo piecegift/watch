@@ -167,6 +167,7 @@ func (w *Watcher) stop() error {
 }
 
 func (w *Watcher) WaitForSync() error {
+	prev := int32(0)
 	for !w.cs.IsCurrent() {
 		time.Sleep(10 * time.Second)
 
@@ -175,6 +176,12 @@ func (w *Watcher) WaitForSync() error {
 			return err
 		}
 		log.Printf("%d %s", header.Height, header.Hash)
+
+		if header.Height == prev {
+			log.Printf("No progress since last check. Restarting...")
+			w.restart(0, rpcclient.NotificationHandlers{})
+		}
+		prev = header.Height
 	}
 	return nil
 }
@@ -265,7 +272,9 @@ func (w *Watcher) restart(startBlock int32, handlers rpcclient.NotificationHandl
 		return
 	}
 
-	w.StartWatching(startBlock, handlers)
+	if handlers.OnFilteredBlockConnected != nil {
+		w.StartWatching(startBlock, handlers)
+	}
 }
 
 func (w *Watcher) AddAddresses(addrs ...string) error {
