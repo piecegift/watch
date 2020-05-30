@@ -49,10 +49,10 @@ func TestWatcher(t *testing.T) {
 		var wg sync.WaitGroup
 		handler := func(height int32, header *wire.BlockHeader, relevantTxs []*btcutil.Tx) {
 			for _, tx := range relevantTxs {
-				log.Printf("Found tx %s.", tx.Hash())
 				if tx.Hash().String() != txid {
-					return
+					continue
 				}
+				log.Printf("Found tx %s.", tx.Hash())
 				outputs := PrepareTxOutputs(tx, false)
 				if outputs[addr] != wantAmount {
 					t.Errorf(
